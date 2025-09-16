@@ -1,58 +1,90 @@
+import "dotenv/config.js";
 import express from "express";
-import dotenv from "dotenv";
-import sequelize from "./config/database.js";
-import { User, Cat, Photo } from "./models/index.js";
-import catsRouter from "./routes/Cats.js";
-import photosRouter from "./routes/Photos.js";
-import authRouter from "./routes/Auth.js";
+import cors from "cors";
+import helmet from "helmet";
 import swaggerUi from "swagger-ui-express";
 import YAML from "yamljs";
-import helmet from "helmet";
-import cors from "cors";
-import errorHandler from "./middlewares/errorHandler.js";
 
-const openapiDocument = YAML.load("./src/docs/openapi.yaml");
+import sequelize from "./config/database.js";
+import "./models/index.js";
 
-
-dotenv.config();
+import authRouter from "./routes/Auth.js";
+import catsRouter from "./routes/Cats.js";
+import photosRouter from "./routes/Photos.js";
+import  errorHandler from "./middlewares/errorHandler.js";
 
 const app = express();
-const port = process.env.PORT || 3000;
 
+// Middleware globaux
 app.use(helmet());
-app.use(cors({ origin: ["http://localhost:3000"], credentials: true }));
-app.use(express.json()); // ✅ pour lire le JSON dans req.body
+app.use(cors({ origin: process.env.CORS_ORIGIN || "*" }));
+app.use(express.json());
 
-app.get("/", (req, res) => {
-  res.send("Cattery backend is running 🚀");
-});
+// Swagger docs
+const swaggerDocument = YAML.load("./src/docs/openapi.yaml");
+app.use("/docs", swaggerUi.serve, swaggerUi.setup(swaggerDocument));
 
-app.use("/docs", swaggerUi.serve, swaggerUi.setup(openapiDocument));
-app.get("/docs.json", (_req, res) => res.json(openapiDocument));
-
-app.use("/cats", catsRouter); // ✅ brancher la route
-app.use("/photos", photosRouter);
+// Routes
 app.use("/auth", authRouter);
+app.use("/cats", catsRouter);
+app.use("/photos", photosRouter);
+app.get("/healthz", (_req, res) => res.json({ ok: true }));
 
+// Error handler global
 app.use(errorHandler);
 
-// DB init
+/* ----------------------------- DB INIT LOGIC ----------------------------- */
+async function initDatabase() {
+  const isProd = process.env.NODE_ENV === "production";
+  const doSync = process.env.DB_SYNC === "true" && !isProd;
+
+  await sequelize.authenticate();
+  console.log("[DB] Connected");
+
+  if (doSync) {
+    const alter = process.env.DB_SYNC_ALTER === "true";
+    const force = process.env.DB_SYNC_FORCE === "true";
+    console.log(`[DB] Sync starting (alter=${alter}, force=${force})`);
+    await sequelize.sync({ alter, force });
+    console.log("[DB] Sync done");
+  } else {
+    console.log("[DB] Sync skipped (production or DB_SYNC not true)");
+    if (isProd) {
+      await assertTablesExist(["Users", "Cats", "Photos"]);
+    }
+  }
+}
+
+async function assertTablesExist(expected) {
+  const qi = sequelize.getQueryInterface();
+  const schemas = await qi.showAllSchemas();
+  const tables = schemas.map((t) => {
+    if (typeof t === "string") return t;
+    return t.tableName || t.TABLE_NAME || Object.values(t)[0];
+  });
+
+  const missing = expected.filter((name) => !tables.includes(name));
+  if (missing.length) {
+    throw new Error(
+      `[DB] Missing tables in production: ${missing.join(", ")}. ` +
+      `Create them before starting the app (ex: run your SQL init or migrations).`
+    );
+  }
+}
+
+/* ------------------------------- BOOTSTRAP ------------------------------- */
+const PORT = process.env.PORT || 3000;
+
 (async () => {
   try {
-    await sequelize.authenticate();
-    console.log("✅ Database connected successfully.");
-
-    if (process.env.NODE_ENV !== "production") {
-      await sequelize.sync({ alter: true }); // crée/altère les tables en dev
-    }
-    console.log("✅ Tables synced with DB.");
-  } catch (error) {
-    console.error("❌ Unable to connect to the database:", error);
+    await initDatabase();
+    app.listen(PORT, () => {
+      console.log(`[Server] Listening on http://localhost:${PORT}`);
+    });
+  } catch (err) {
+    console.error("[Server] Startup failed:", err);
+    process.exit(1);
   }
 })();
 
-app.get("/healthz", (_req, res) => res.json({ ok: true }));
-
-app.listen(port, () => {
-  console.log(`🚀 Server running on http://localhost:${port}`);
-});
+export default app;

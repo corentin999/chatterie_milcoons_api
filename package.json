@@ -4,10 +4,10 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
-    "db:seed:dev": "node src/scripts/dev-seed.js"
+    "db:sync:dev": "NODE_ENV=development node -e \"import('./src/scripts/dev-sync.js')\"",
+    "db:seed:dev": "NODE_ENV=development node src/scripts/dev-seed.js"
   },
   "repository": {
     "type": "git",

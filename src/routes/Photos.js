@@ -5,7 +5,6 @@ import { requireAuth, requireRole } from "../middlewares/auth.js";
 import { validate } from "../middlewares/validate.js";
 import { uploadSingleImage } from "../middlewares/upload.js";
 import { uploadImage, deleteImage } from "../services/cloudinaryService.js";
-
 import {
   photosListQuerySchema,
   photoUploadSchema,
@@ -14,7 +13,6 @@ import {
 
 const router = express.Router();
 
-/* --------------------------------- Utils --------------------------------- */
 function boom(message, statusCode = 400) {
   const e = new Error(message);
   e.statusCode = statusCode;
@@ -22,11 +20,7 @@ function boom(message, statusCode = 400) {
 }
 
 /* ------------------------------- PUBLIC GET ------------------------------ */
-/**
- * GET /photos?catId=1&page=1&limit=20&sort=position:asc
- * - Public
- * - Pagination + tri (par défaut: position asc)
- */
+/** GET /photos?catId=1&page=1&limit=20&sort=position:asc */
 router.get("/", async (req, res, next) => {
   try {
     const parsed = photosListQuerySchema.safeParse(req.query);
@@ -36,12 +30,7 @@ router.get("/", async (req, res, next) => {
       return next(err);
     }
 
-    const {
-      catId,
-      page = 1,
-      limit = 20,
-      sort = "position:asc",
-    } = parsed.data;
+    const { catId, page = 1, limit = 20, sort = "position:asc" } = parsed.data;
 
     const safeLimit = Math.min(Math.max(1, Number(limit)), 100);
     const safePage = Math.max(1, Number(page));
@@ -51,7 +40,7 @@ router.get("/", async (req, res, next) => {
     if (catId) where.catId = catId;
 
     const [field, dir] = sort.split(":");
-    const order = [[field, dir.toUpperCase()], ["id", "ASC"]];
+    const order = [[field, (dir || "ASC").toUpperCase()], ["id", "ASC"]];
 
     const { rows, count } = await Photo.findAndCountAll({
       where,
@@ -77,17 +66,12 @@ router.get("/", async (req, res, next) => {
 });
 
 /* ------------------------------ ADMIN-ONLY ------------------------------- */
-/**
- * POST /photos/upload
- * - Admin
- * - multipart/form-data: fields { catId, cover?, position? }, file field "file"
- * - Upload vers Cloudinary puis création en DB
- */
+/** POST /photos/upload (multipart → Cloudinary) */
 router.post(
   "/upload",
   requireAuth,
   requireRole("admin"),
-  uploadSingleImage, // -> req.file, req.body (strings)
+  uploadSingleImage, // -> req.file (buffer), req.body (strings)
   (req, _res, next) => {
     const parsed = photoUploadSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -101,13 +85,12 @@ router.post(
   async (req, res, next) => {
     try {
       const { catId, cover, position } = req.body;
-
       if (!req.file) throw boom("file is required (multipart field 'file')");
 
       const cat = await Cat.findByPk(catId);
       if (!cat) throw boom("Cat not found", 404);
 
-      const result = await uploadImage(req.file.buffer); // -> { secure_url, public_id }
+      const result = await uploadImage(req.file.buffer); // { secure_url, public_id }
       const photo = await Photo.create({
         catId,
         url: result.secure_url,
@@ -130,12 +113,7 @@ router.post(
   }
 );
 
-/**
- * PATCH /photos/:id
- * - Admin
- * - body JSON: { url?, cover?, position? }
- * - Permet de changer la cover (unique par chat) et la position
- */
+/** PATCH /photos/:id (url|cover|position) */
 router.patch(
   "/:id",
   requireAuth,
@@ -170,11 +148,7 @@ router.patch(
   }
 );
 
-/**
- * POST /photos/:id/set-cover
- * - Admin
- * - Raccourci pour forcer la cover unique sur un chat
- */
+/** POST /photos/:id/set-cover (optionnel) */
 router.post(
   "/:id/set-cover",
   requireAuth,
@@ -198,11 +172,7 @@ router.post(
   }
 );
 
-/**
- * DELETE /photos/:id
- * - Admin
- * - Supprime l’enregistrement et tente de supprimer l’asset Cloudinary
- */
+/** DELETE /photos/:id */
 router.delete(
   "/:id",
   requireAuth,
